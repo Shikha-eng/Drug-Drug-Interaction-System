@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DDI PREDICT — Drug Interaction Intelligence</title>
+<meta name="description" content="Graph ML-powered Drug-Drug Interaction prediction using Node2Vec embeddings and XGBoost classification. Built for clinical researchers."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+/* ===== RESET & BASE ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0A0A0F;
+  --surface:#111118;
+  --surface-el:#1A1A24;
+  --border:#2A2A38;
+  --accent:#00E5FF;
+  --danger:#FF3B5C;
+  --warning:#FFB800;
+  --safe:#00E096;
+  --text-p:#F0F0FF;
+  --text-s:#8888AA;
+  --text-t:#444466;
+  --font-head:'Space Grotesk',sans-serif;
+  --font-mono:'JetBrains Mono',monospace;
+  --font-body:'Inter',sans-serif;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text-p);font-family:var(--font-body)}
+/* ===== LAYOUT ===== */
+#app{display:flex;height:100vh;width:100vw;overflow:hidden}
+/* LEFT PANEL */
+#left-panel{
+  width:280px;min-width:280px;background:var(--surface);
+  border-right:1px solid var(--border);display:flex;flex-direction:column;
+  overflow-y:auto;overflow-x:hidden;z-index:10;
+}
+#left-panel::-webkit-scrollbar{width:4px}
+#left-panel::-webkit-scrollbar-track{background:transparent}
+#left-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+/* CENTER PANEL */
+#center-panel{
+  flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;
+  background:radial-gradient(ellipse at 50% 0%,#131320 0%,var(--bg) 70%);
+}
+/* dot-grid overlay */
+#center-panel::before{
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:0;
+  background-image:radial-gradient(circle,#1A1A2A 1px,transparent 1px);
+  background-size:28px 28px;opacity:0.6;
+}
+/* RIGHT PANEL */
+#right-panel{
+  width:260px;min-width:260px;background:var(--surface);
+  border-left:1px solid var(--border);display:flex;flex-direction:column;
+  overflow-y:auto;z-index:10;
+}
+/* ===== BRANDING ===== */
+.logo-block{padding:28px 20px 20px}
+.logo-wordmark{font-family:var(--font-head);font-size:1.5rem;font-weight:700;letter-spacing:0.2em;line-height:1}
+.logo-ddi{color:var(--accent)}
+.logo-predict{color:var(--text-p)}
+.logo-tagline{font-family:var(--font-mono);font-size:0.58rem;color:var(--text-s);margin-top:6px;letter-spacing:0.05em;line-height:1.5}
+.divider{height:1px;background:var(--border);margin:0 20px}
+/* ===== SECTION HEADER ===== */
+.section-header{
+  font-family:var(--font-mono);font-size:0.6rem;font-weight:700;
+  letter-spacing:0.18em;color:var(--text-t);text-transform:uppercase;
+  padding:16px 20px 10px;
+}
+/* ===== MODEL VITALS ===== */
+.vitals-list{padding:0 20px 16px;display:flex;flex-direction:column;gap:8px}
+.vital-row{display:flex;justify-content:space-between;align-items:center}
+.vital-label{font-family:var(--font-mono);font-size:0.65rem;color:var(--text-s);letter-spacing:0.05em}
+.vital-value{font-family:var(--font-mono);font-size:0.72rem;color:var(--accent);font-weight:500}
+/* ===== RECENT QUERIES ===== */
+.recent-list{padding:0 12px 16px;display:flex;flex-direction:column;gap:6px;list-style:none}
+.recent-item{
+  background:var(--surface-el);border:1px solid var(--border);border-radius:6px;
+  padding:8px 10px;cursor:pointer;transition:border-color 0.2s,background 0.2s;
+  animation:slideInLeft 0.3s ease-out;
+}
+.recent-item:hover{border-color:var(--accent);background:#1e1e2e}
+.recent-drugs{font-family:var(--font-mono);font-size:0.62rem;color:var(--text-p);word-break:break-all;line-height:1.4}
+.recent-badge{display:inline-block;margin-top:5px;padding:2px 7px;border-radius:10px;font-family:var(--font-mono);font-size:0.55rem;font-weight:700;letter-spacing:0.07em}
+.badge-high{background:rgba(255,59,92,0.18);color:var(--danger);border:1px solid rgba(255,59,92,0.35)}
+.badge-medium{background:rgba(255,184,0,0.15);color:var(--warning);border:1px solid rgba(255,184,0,0.3)}
+.badge-low{background:rgba(0,224,150,0.12);color:var(--safe);border:1px solid rgba(0,224,150,0.28)}
+.badge-unknown{background:rgba(136,136,170,0.12);color:var(--text-s);border:1px solid var(--border)}
+/* ===== LEFT PANEL FOOTER ===== */
+.panel-footer{margin-top:auto;padding:16px 20px;border-top:1px solid var(--border)}
+.disclaimer-text{font-family:var(--font-mono);font-size:0.55rem;color:var(--text-t);line-height:1.6}
+/* ===== OFFLINE BANNER ===== */
+#offline-banner{
+  display:none;background:rgba(255,59,92,0.12);border-bottom:1px solid rgba(255,59,92,0.4);
+  padding:10px 24px;font-family:var(--font-mono);font-size:0.7rem;color:var(--danger);
+  letter-spacing:0.05em;position:relative;z-index:5;align-items:center;gap:8px;
+}
+#offline-banner.visible{display:flex}
+/* ===== CENTER TOP BAR ===== */
+#search-area{
+  position:relative;z-index:5;padding:32px 32px 24px;
+  background:linear-gradient(180deg,rgba(17,17,24,0.9) 0%,transparent 100%);
+}
+.search-title{font-family:var(--font-head);font-size:0.75rem;font-weight:600;letter-spacing:0.15em;color:var(--text-s);text-transform:uppercase;margin-bottom:20px}
+/* ===== INPUT ROW ===== */
+.input-row{display:flex;align-items:center;gap:0}
+.input-group{flex:1;position:relative}
+.input-label{font-family:var(--font-mono);font-size:0.58rem;letter-spacing:0.12em;color:var(--text-s);text-transform:uppercase;margin-bottom:6px}
+.drug-input-wrap{position:relative;display:flex;align-items:center}
+.drug-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-t);z-index:2;pointer-events:none;flex-shrink:0}
+.drug-input{
+  width:100%;padding:14px 14px 14px 40px;
+  background:var(--surface-el);border:1px solid var(--border);border-radius:8px;
+  color:var(--text-p);font-family:var(--font-mono);font-size:0.82rem;
+  outline:none;transition:border-color 0.2s,box-shadow 0.2s;
+  caret-color:var(--accent);
+}
+.drug-input::placeholder{color:var(--text-t)}
+.drug-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(0,229,255,0.22)}
+.drug-input.error{border-color:var(--danger);box-shadow:0 0 0 2px rgba(255,59,92,0.2);animation:shake 0.4s ease}
+/* ===== AUTOCOMPLETE ===== */
+.autocomplete-dropdown{
+  position:absolute;top:calc(100% + 4px);left:0;right:0;
+  background:var(--surface-el);border:1px solid var(--border);border-radius:8px;
+  overflow:hidden;z-index:100;box-shadow:0 8px 32px rgba(0,0,0,0.6);
+  display:none;
+}
+.autocomplete-dropdown.open{display:block}
+.ac-item{
+  padding:10px 14px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-p);
+  cursor:pointer;border-bottom:1px solid rgba(42,42,56,0.5);
+  transition:background 0.15s,color 0.15s;
+  opacity:0;animation:fadeIn 0.2s ease forwards;
+}
+.ac-item:last-child{border-bottom:none}
+.ac-item:hover,.ac-item.selected{background:rgba(0,229,255,0.1);color:var(--accent)}
+/* ===== HEX VS DIVIDER ===== */
+.vs-divider{
+  width:48px;min-width:48px;display:flex;align-items:flex-end;justify-content:center;
+  padding-bottom:2px;
+}
+.vs-hex{
+  width:40px;height:44px;background:var(--surface-el);border:1px solid var(--accent);
+  clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-mono);font-size:0.65rem;font-weight:700;color:var(--accent);
+  letter-spacing:0.05em;box-shadow:0 0 12px rgba(0,229,255,0.25);
+  margin-bottom:8px;
+}
+/* ===== ANALYZE BUTTON ===== */
+#analyze-btn{
+  width:100%;margin-top:18px;padding:15px 24px;
+  background:var(--accent);border:none;border-radius:8px;
+  color:#000;font-family:var(--font-head);font-size:0.9rem;font-weight:700;
+  letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;
+  transition:transform 0.2s,box-shadow 0.2s,background 0.2s;
+  position:relative;overflow:hidden;
+}
+#analyze-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 0 24px rgba(0,229,255,0.45)}
+#analyze-btn:disabled{background:var(--surface-el);color:var(--text-t);cursor:not-allowed;transform:none;box-shadow:none}
+#analyze-btn.loading{background:var(--surface-el);color:var(--accent);cursor:not-allowed}
+.scan-line{
+  position:absolute;top:0;left:-100%;width:60%;height:100%;
+  background:linear-gradient(90deg,transparent,rgba(0,229,255,0.2),transparent);
+  animation:scan 1.2s linear infinite;
+}
+/* ===== RESULT AREA ===== */
+#result-area{
+  position:relative;z-index:5;flex:1;overflow-y:auto;padding:0 32px 32px;
+}
+#result-area::-webkit-scrollbar{width:4px}
+#result-area::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+/* ===== EMPTY STATE ===== */
+#empty-state{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:100%;gap:16px;opacity:1;transition:opacity 0.3s;
+}
+#empty-state svg{opacity:0.04}
+.empty-text{font-family:var(--font-mono);font-size:0.7rem;color:var(--text-t);letter-spacing:0.08em}
+/* ===== RESULT CARD ===== */
+#result-card{
+  display:none;background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  overflow:hidden;transform:translateY(20px);opacity:0;
+  transition:transform 0.4s ease-out,opacity 0.4s ease-out;
+  position:relative;
+}
+#result-card.visible{display:block}
+#result-card.animated{transform:translateY(0);opacity:1}
+#result-card.high-risk-border{animation:borderRotate 4s linear infinite}
+.result-main{padding:28px 28px 20px}
+.probability-display{
+  font-family:var(--font-mono);font-size:5.5rem;font-weight:700;line-height:1;
+  letter-spacing:-0.02em;transition:color 0.3s;
+}
+.result-top-row{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+.result-badge-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:8px;padding-top:8px}
+.risk-badge-large{
+  padding:6px 18px;border-radius:20px;font-family:var(--font-mono);
+  font-size:0.75rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;
+}
+.badge-large-high{background:rgba(255,59,92,0.18);color:var(--danger);border:1px solid rgba(255,59,92,0.5)}
+.badge-large-medium{background:rgba(255,184,0,0.15);color:var(--warning);border:1px solid rgba(255,184,0,0.4)}
+.badge-large-low{background:rgba(0,224,150,0.12);color:var(--safe);border:1px solid rgba(0,224,150,0.35)}
+.badge-large-unknown{background:rgba(136,136,170,0.1);color:var(--text-s);border:1px solid var(--border)}
+/* ===== RISK METER ===== */
+.risk-meter-wrap{margin-bottom:20px}
+.risk-meter-track{
+  height:6px;background:linear-gradient(90deg,var(--safe),var(--warning),var(--danger));
+  border-radius:3px;position:relative;overflow:visible;
+}
+.risk-meter-mask{
+  position:absolute;top:0;right:0;bottom:0;background:rgba(10,10,15,0.82);
+  border-radius:0 3px 3px 0;transition:width 0.8s cubic-bezier(0.4,0,0.2,1);
+}
+.risk-meter-marker{
+  position:absolute;top:50%;transform:translate(-50%,-50%);
+  width:14px;height:14px;border-radius:50%;border:2px solid var(--bg);
+  box-shadow:0 0 8px currentColor;transition:left 0.8s cubic-bezier(0.4,0,0.2,1),background-color 0.3s;
+}
+.risk-meter-labels{display:flex;justify-content:space-between;margin-top:6px}
+.risk-meter-label{font-family:var(--font-mono);font-size:0.55rem;color:var(--text-t);letter-spacing:0.05em}
+/* ===== DRUG PAIR TITLE ===== */
+.drug-pair-title{
+  font-family:var(--font-head);font-size:1.05rem;font-weight:600;color:var(--text-p);
+  letter-spacing:0.04em;margin-bottom:12px;word-break:break-word;
+}
+.drug-pair-title span{color:var(--text-s);font-weight:400}
+/* ===== METADATA ROW ===== */
+.meta-row{display:flex;flex-wrap:wrap;gap:16px;border-top:1px solid var(--border);padding-top:14px;margin-bottom:0}
+.meta-item{display:flex;flex-direction:column;gap:3px}
+.meta-label{font-family:var(--font-mono);font-size:0.55rem;color:var(--text-t);letter-spacing:0.1em;text-transform:uppercase}
+.meta-value{font-family:var(--font-mono);font-size:0.7rem;color:var(--text-s)}
+/* ===== DISCLAIMER CARD ===== */
+.disclaimer-box{
+  margin:0 28px 28px;padding:14px 16px;border-left:3px solid var(--warning);
+  background:rgba(255,184,0,0.06);border-radius:0 6px 6px 0;
+}
+.disclaimer-box p{font-family:var(--font-mono);font-size:0.6rem;color:var(--text-s);line-height:1.7;letter-spacing:0.02em}
+/* ===== INLINE ERROR ===== */
+.inline-error{
+  font-family:var(--font-mono);font-size:0.62rem;color:var(--danger);
+  margin-top:6px;display:none;align-items:center;gap:6px;
+}
+.inline-error.visible{display:flex}
+/* ===== GRAPH PANEL ===== */
+.panel-title{font-family:var(--font-head);font-size:0.8rem;font-weight:600;padding:20px 20px 12px;letter-spacing:0.05em}
+#graph-container{flex:1;min-height:260px;max-height:300px;position:relative;overflow:hidden;}
+#graph-svg{width:100%;height:100%}
+.graph-stats-list{padding:0 20px 16px;display:flex;flex-direction:column;gap:8px}
+/* ===== TOAST ===== */
+#toast{
+  position:fixed;bottom:24px;right:24px;background:var(--surface-el);
+  border:1px solid var(--border);border-radius:8px;padding:12px 18px;
+  font-family:var(--font-mono);font-size:0.7rem;color:var(--text-p);
+  box-shadow:0 8px 32px rgba(0,0,0,0.5);z-index:9999;
+  transform:translateY(80px);opacity:0;transition:transform 0.3s,opacity 0.3s;pointer-events:none;
+}
+#toast.show{transform:translateY(0);opacity:1}
+/* ===== ANIMATIONS ===== */
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+@keyframes slideInLeft{from{transform:translateX(-20px);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes scan{0%{left:-60%}100%{left:140%}}
+@keyframes pulse{0%,100%{box-shadow:0 0 16px rgba(0,229,255,0.3)}50%{box-shadow:0 0 28px rgba(0,229,255,0.55)}}
+@keyframes borderRotate{
+  0%{border-image:conic-gradient(from 0deg,#FF3B5C,#FF6B35,#FFB800,#FF3B5C) 1}
+  100%{border-image:conic-gradient(from 360deg,#FF3B5C,#FF6B35,#FFB800,#FF3B5C) 1}
+}
+#analyze-btn:hover:not(:disabled){animation:pulse 1.5s ease infinite}
+/* ===== MOBILE ===== */
+@media(max-width:768px){
+  #app{flex-direction:column}
+  #left-panel,#right-panel{width:100%;min-width:unset;height:auto;max-height:220px}
+  .probability-display{font-size:3.5rem}
+  #search-area{padding:20px 16px 16px}
+  #result-area{padding:0 16px 24px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- LEFT PANEL -->
+  <aside id="left-panel">
+    <div class="logo-block">
+      <div class="logo-wordmark"><span class="logo-ddi">DDI</span><span class="logo-predict"> PREDICT</span></div>
+      <div class="logo-tagline">Graph ML · Node2Vec · XGBoost</div>
+    </div>
+    <div class="divider"></div>
+    <div class="section-header">Model Vitals</div>
+    <div class="vitals-list">
+      <div class="vital-row"><span class="vital-label">AUROC</span><span class="vital-value" id="v-auroc">0.9777</span></div>
+      <div class="vital-row"><span class="vital-label">AUPRC</span><span class="vital-value" id="v-auprc">0.9757</span></div>
+      <div class="vital-row"><span class="vital-label">Accuracy</span><span class="vital-value" id="v-acc">93.0%</span></div>
+      <div class="vital-row"><span class="vital-label">Drugs in graph</span><span class="vital-value" id="v-drugs">—</span></div>
+      <div class="vital-row"><span class="vital-label">Threshold</span><span class="vital-value" id="v-thresh">0.4391</span></div>
+    </div>
+    <div class="divider"></div>
+    <div class="section-header">Recent Queries</div>
+    <ul class="recent-list" id="recent-list">
+      <li style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text-t);padding:4px 8px">No queries yet</li>
+    </ul>
+    <div class="panel-footer">
+      <p class="disclaimer-text">FOR RESEARCH PURPOSES ONLY. Predictions are generated by a machine learning model and do not constitute medical advice. Always consult licensed clinical pharmacists for patient care decisions.</p>
+    </div>
+  </aside>
+
+  <!-- CENTER PANEL -->
+  <main id="center-panel">
+    <!-- offline banner -->
+    <div id="offline-banner">⚠ INFERENCE ENGINE OFFLINE — Could not reach API at localhost:8000</div>
+
+    <div id="search-area">
+      <div class="search-title">Drug-Drug Interaction Analysis</div>
+      <div class="input-row">
+        <!-- COMPOUND A -->
+        <div class="input-group">
+          <div class="input-label">Compound A</div>
+          <div class="drug-input-wrap">
+            <span class="drug-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="4 2"/><line x1="12" y1="3" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="3" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="21" y2="12"/></svg>
+            </span>
+            <input id="drug-a-input" class="drug-input" type="text" placeholder="Search compound name..." autocomplete="off" aria-label="Drug A"/>
+            <div class="autocomplete-dropdown" id="ac-a"></div>
+          </div>
+          <div class="inline-error" id="err-a"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span id="err-a-text"></span></div>
+        </div>
+        <!-- VS HEX -->
+        <div class="vs-divider">
+          <div class="vs-hex">VS</div>
+        </div>
+        <!-- COMPOUND B -->
+        <div class="input-group">
+          <div class="input-label">Compound B</div>
+          <div class="drug-input-wrap">
+            <span class="drug-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9" stroke-dasharray="4 2"/><line x1="12" y1="3" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="21"/><line x1="3" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="21" y2="12"/></svg>
+            </span>
+            <input id="drug-b-input" class="drug-input" type="text" placeholder="Search compound name..." autocomplete="off" aria-label="Drug B"/>
+            <div class="autocomplete-dropdown" id="ac-b"></div>
+          </div>
+          <div class="inline-error" id="err-b"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span id="err-b-text"></span></div>
+        </div>
+      </div>
+      <!-- same-drug error -->
+      <div class="inline-error" id="err-same" style="margin-top:10px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>IDENTICAL COMPOUNDS — enter two different drugs</span>
+      </div>
+      <button id="analyze-btn">ANALYZE INTERACTION</button>
+    </div>
+
+    <!-- RESULT AREA -->
+    <div id="result-area">
+      <!-- empty state -->
+      <div id="empty-state">
+        <svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="90" cy="90" r="20" fill="none" stroke="#F0F0FF" stroke-width="2"/>
+          <circle cx="90" cy="90" r="40" fill="none" stroke="#F0F0FF" stroke-width="1" stroke-dasharray="6 4"/>
+          <circle cx="90" cy="90" r="60" fill="none" stroke="#F0F0FF" stroke-width="0.8" stroke-dasharray="4 6"/>
+          <circle cx="90" cy="50" r="7" fill="#F0F0FF"/>
+          <circle cx="90" cy="130" r="7" fill="#F0F0FF"/>
+          <circle cx="50" cy="90" r="7" fill="#F0F0FF"/>
+          <circle cx="130" cy="90" r="7" fill="#F0F0FF"/>
+          <line x1="90" y1="70" x2="90" y2="83" stroke="#F0F0FF" stroke-width="1.5"/>
+          <line x1="90" y1="97" x2="90" y2="123" stroke="#F0F0FF" stroke-width="1.5"/>
+          <line x1="70" y1="90" x2="83" y2="90" stroke="#F0F0FF" stroke-width="1.5"/>
+          <line x1="97" y1="90" x2="123" y2="90" stroke="#F0F0FF" stroke-width="1.5"/>
+        </svg>
+        <span class="empty-text">SELECT TWO COMPOUNDS TO BEGIN INTERACTION ANALYSIS</span>
+      </div>
+      <!-- result card -->
+      <div id="result-card">
+        <div class="result-main">
+          <div class="result-top-row">
+            <div class="probability-display" id="prob-display">0.000</div>
+            <div class="result-badge-wrap">
+              <div class="risk-badge-large" id="risk-badge-large">— RISK</div>
+            </div>
+          </div>
+          <div class="risk-meter-wrap">
+            <div class="risk-meter-track">
+              <div class="risk-meter-mask" id="risk-mask" style="width:100%"></div>
+              <div class="risk-meter-marker" id="risk-marker" style="left:0%"></div>
+            </div>
+            <div class="risk-meter-labels"><span class="risk-meter-label">UNLIKELY (0.0)</span><span class="risk-meter-label">POSSIBLE (0.44)</span><span class="risk-meter-label">LIKELY (1.0)</span></div>
+          </div>
+          <div class="drug-pair-title" id="drug-pair-title">DRUG A <span>+</span> DRUG B</div>
+          <div class="meta-row">
+            <div class="meta-item"><div class="meta-label">Threshold</div><div class="meta-value" id="meta-thresh">0.4391</div></div>
+            <div class="meta-item"><div class="meta-label">Model</div><div class="meta-value">Node2Vec + XGBoost v2</div></div>
+            <div class="meta-item"><div class="meta-label">Queried</div><div class="meta-value" id="meta-time">—</div></div>
+          </div>
+        </div>
+        <div class="disclaimer-box">
+          <p>⚠ This prediction is generated by a machine learning model trained on known drug interaction databases. It is intended as a decision-support tool for qualified healthcare professionals only. Clinical judgment must always take precedence. This output does not constitute a prescription or clinical recommendation.</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- RIGHT PANEL -->
+  <aside id="right-panel">
+    <div class="panel-title">INTERACTION MAP</div>
+    <div id="graph-container">
+      <svg id="graph-svg"></svg>
+    </div>
+    <div class="divider"></div>
+    <div class="section-header">Graph Stats</div>
+    <div class="graph-stats-list">
+      <div class="vital-row"><span class="vital-label">Nodes in graph</span><span class="vital-value">1,641</span></div>
+      <div class="vital-row"><span class="vital-label">Edges in graph</span><span class="vital-value">106,757</span></div>
+      <div class="vital-row"><span class="vital-label">Graph density</span><span class="vital-value">9.87%</span></div>
+      <div class="vital-row"><span class="vital-label">Embedding dim</span><span class="vital-value">128</span></div>
+    </div>
+  </aside>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+/* ===== CONFIG ===== */
+const API_BASE = 'http://localhost:8000';
+const THRESHOLD = 0.4391;
+const HIGH_THRESHOLD = 0.70;
+
+/* ===== STATE ===== */
+let drugList = [];
+let recentQueries = [];
+let debounceTimerA = null, debounceTimerB = null;
+let acIndexA = -1, acIndexB = -1;
+
+/* ===== ELEMENTS ===== */
+const drugAInput = document.getElementById('drug-a-input');
+const drugBInput = document.getElementById('drug-b-input');
+const acA = document.getElementById('ac-a');
+const acB = document.getElementById('ac-b');
+const analyzeBtn = document.getElementById('analyze-btn');
+const resultCard = document.getElementById('result-card');
+const emptyState = document.getElementById('empty-state');
+const offlineBanner = document.getElementById('offline-banner');
+const recentList = document.getElementById('recent-list');
+const toast = document.getElementById('toast');
+
+/* ===== INIT ===== */
+window.addEventListener('DOMContentLoaded', async () => {
+  animateVitals();
+  initGraph();
+  await Promise.all([fetchHealth(), fetchDrugs()]);
+});
+
+/* ===== COUNT-UP ANIMATION for vitals ===== */
+function animateVitals() {
+  // Animate AUROC: 0→0.9777, AUPRC: 0→0.9757, Accuracy display
+  animateCount('v-auroc', 0, 0.9777, 1200, v => v.toFixed(4));
+  animateCount('v-auprc', 0, 0.9757, 1300, v => v.toFixed(4));
+  animateCount('v-acc',   0, 93.0,   1100, v => v.toFixed(1) + '%');
+  animateCount('v-thresh',0, 0.4391, 1000, v => v.toFixed(4));
+}
+function animateCount(id, from, to, duration, format) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const start = performance.now();
+  function frame(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const ease = 1 - Math.pow(1 - t, 3);
+    el.textContent = format(from + (to - from) * ease);
+    if (t < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ===== API CALLS ===== */
+async function fetchHealth() {
+  try {
+    const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) throw new Error('Non-200');
+    const data = await res.json();
+    const count = data.num_drugs || data.drugs_count || data.drug_count || data.total_drugs || '—';
+    document.getElementById('v-drugs').textContent = typeof count === 'number' ? count.toLocaleString() : count;
+  } catch {
+    offlineBanner.classList.add('visible');
+    document.getElementById('v-drugs').textContent = 'OFFLINE';
+  }
+}
+
+async function fetchDrugs() {
+  try {
+    const res = await fetch(`${API_BASE}/drugs`, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) throw new Error('Non-200');
+    const data = await res.json();
+    // Handle various response shapes: array of strings, array of objects, {drugs:[...]}
+    if (Array.isArray(data)) {
+      drugList = data.map(d => typeof d === 'string' ? d : (d.name || d.drug_id || String(d)));
+    } else if (data.drugs) {
+      drugList = Array.isArray(data.drugs) ? data.drugs.map(d => typeof d === 'string' ? d : (d.name || d.drug_id || String(d))) : [];
+    }
+  } catch {
+    // Drugs list unavailable; autocomplete will be empty but form still works
+  }
+}
+
+/* ===== AUTOCOMPLETE ===== */
+function setupAutocomplete(input, dropdown, getIndex, setIndex) {
+  input.addEventListener('input', () => {
+    clearTimeout(input === drugAInput ? debounceTimerA : debounceTimerB);
+    const timer = setTimeout(() => renderDropdown(input, dropdown), 300);
+    if (input === drugAInput) debounceTimerA = timer; else debounceTimerB = timer;
+    clearError(input);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    const items = dropdown.querySelectorAll('.ac-item');
+    let idx = getIndex();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      idx = Math.min(idx + 1, items.length - 1);
+      setIndex(idx); highlightAC(items, idx);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      idx = Math.max(idx - 1, 0);
+      setIndex(idx); highlightAC(items, idx);
+    } else if (e.key === 'Enter') {
+      if (idx >= 0 && items[idx]) { selectDrug(input, dropdown, items[idx].textContent, setIndex); }
+    } else if (e.key === 'Escape') {
+      closeDropdown(dropdown); setIndex(-1);
+    }
+  });
+
+  // Close on outside click
+  document.addEventListener('click', (e) => {
+    if (!input.contains(e.target) && !dropdown.contains(e.target)) closeDropdown(dropdown);
+  });
+}
+
+function renderDropdown(input, dropdown) {
+  const q = input.value.trim().toLowerCase();
+  if (!q || q.length < 1) { closeDropdown(dropdown); return; }
+  const matches = drugList.filter(d => d.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length) { closeDropdown(dropdown); return; }
+  dropdown.innerHTML = '';
+  matches.forEach((drug, i) => {
+    const item = document.createElement('div');
+    item.className = 'ac-item';
+    item.textContent = drug;
+    item.style.animationDelay = `${i * 50}ms`;
+    item.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const setIdx = dropdown === acA ? (v => acIndexA = v) : (v => acIndexB = v);
+      selectDrug(input, dropdown, drug, setIdx);
+    });
+    dropdown.appendChild(item);
+  });
+  dropdown.classList.add('open');
+}
+
+function highlightAC(items, idx) {
+  items.forEach((el, i) => el.classList.toggle('selected', i === idx));
+}
+
+function selectDrug(input, dropdown, name, setIndex) {
+  input.value = name;
+  closeDropdown(dropdown);
+  setIndex(-1);
+  clearError(input);
+}
+
+function closeDropdown(dropdown) {
+  dropdown.classList.remove('open');
+  dropdown.innerHTML = '';
+}
+
+// Wire up autocomplete for both inputs
+setupAutocomplete(drugAInput, acA, () => acIndexA, v => acIndexA = v);
+setupAutocomplete(drugBInput, acB, () => acIndexB, v => acIndexB = v);
+
+/* ===== ERROR HELPERS ===== */
+function showError(input, errEl, errTextEl, msg) {
+  input.classList.add('error');
+  if (errTextEl) errTextEl.textContent = msg;
+  errEl.classList.add('visible');
+  // Remove error class after shake animation
+  setTimeout(() => input.classList.remove('error'), 450);
+}
+function clearError(input) {
+  input.classList.remove('error');
+  const errId = input.id === 'drug-a-input' ? 'err-a' : 'err-b';
+  document.getElementById(errId).classList.remove('visible');
+  document.getElementById('err-same').classList.remove('visible');
+}
+
+/* ===== ANALYZE ===== */
+analyzeBtn.addEventListener('click', runAnalysis);
+
+async function runAnalysis() {
+  const drugA = drugAInput.value.trim();
+  const drugB = drugBInput.value.trim();
+  let valid = true;
+
+  // Validation
+  document.getElementById('err-same').classList.remove('visible');
+  [drugAInput, drugBInput].forEach(inp => { inp.classList.remove('error'); });
+
+  if (!drugA) { showError(drugAInput, document.getElementById('err-a'), document.getElementById('err-a-text'), 'Compound A is required'); valid = false; }
+  if (!drugB) { showError(drugBInput, document.getElementById('err-b'), document.getElementById('err-b-text'), 'Compound B is required'); valid = false; }
+  if (drugA && drugB && drugA.toLowerCase() === drugB.toLowerCase()) {
+    document.getElementById('err-same').classList.add('visible');
+    valid = false;
+  }
+  if (!valid) return;
+
+  // Loading state
+  setLoading(true);
+
+  try {
+    const res = await fetch(`${API_BASE}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ drug_a: drugA, drug_b: drugB }),
+      signal: AbortSignal.timeout(15000)
+    });
+
+    const data = await res.json();
+
+    // Normalize backend field names to what frontend expects
+    // backend returns interaction_probability; frontend expects 'probability'
+    if (data.interaction_probability !== undefined) {
+      data.probability = data.interaction_probability;
+    }
+
+    if (!res.ok) {
+      // Handle API-level errors (e.g., drug not found)
+      const msg = data.detail || data.message || data.error || 'Unknown API error';
+      handleApiError(msg, drugA, drugB, data);
+      return;
+    }
+
+    showResult(data, drugA, drugB);
+
+  } catch (err) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      showToast('⏱ Request timed out — inference server may be overloaded');
+    } else {
+      showToast('⚠ Network error — could not reach inference engine');
+      offlineBanner.classList.add('visible');
+    }
+  } finally {
+    setLoading(false);
+  }
+}
+
+function handleApiError(msg, drugA, drugB, data) {
+  const lower = msg.toLowerCase();
+  if (lower.includes('not found') || lower.includes('unknown') || lower.includes('not in graph')) {
+    // Try to detect which drug is unknown
+    const aUnknown = lower.includes(drugA.toLowerCase()) || data.drug_a_status === 'unknown';
+    const bUnknown = lower.includes(drugB.toLowerCase()) || data.drug_b_status === 'unknown';
+    if (aUnknown || (!aUnknown && !bUnknown)) {
+      showError(drugAInput, document.getElementById('err-a'), document.getElementById('err-a-text'), 'Not in knowledge graph — try a different compound name');
+    }
+    if (bUnknown || (!aUnknown && !bUnknown)) {
+      showError(drugBInput, document.getElementById('err-b'), document.getElementById('err-b-text'), 'Not in knowledge graph — try a different compound name');
+    }
+    // Still show an "UNKNOWN" card if response contains probability
+    if (data.probability !== undefined) showResult(data, drugA, drugB);
+    else showUnknownCard(drugA, drugB);
+  } else {
+    showToast(`API Error: ${msg}`);
+  }
+}
+
+/* ===== SHOW RESULT ===== */
+function showResult(data, drugA, drugB) {
+  const prob = typeof data.probability === 'number' ? data.probability : parseFloat(data.probability);
+  const isUnknown = isNaN(prob);
+  const risk = isUnknown ? 'unknown' : getRisk(prob);
+  const riskLabel = { high: 'INTERACTION LIKELY', medium: 'POSSIBLE INTERACTION', low: 'UNLIKELY TO INTERACT', unknown: 'NOT IN GRAPH'  }[risk];
+  const riskColor = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--safe)', unknown: 'var(--text-s)' }[risk];
+  const badgeClass = { high: 'badge-large-high', medium: 'badge-large-medium', low: 'badge-large-low', unknown: 'badge-large-unknown' }[risk];
+
+  // Update card content
+  const probDisplay = document.getElementById('prob-display');
+  probDisplay.textContent = isUnknown ? 'N/A' : prob.toFixed(3);
+  probDisplay.style.color = riskColor;
+
+  const badge = document.getElementById('risk-badge-large');
+  badge.textContent = riskLabel;
+  badge.className = `risk-badge-large ${badgeClass}`;
+
+  document.getElementById('drug-pair-title').innerHTML = `${escapeHtml(drugA.toUpperCase())} <span>+</span> ${escapeHtml(drugB.toUpperCase())}`;
+  document.getElementById('meta-thresh').textContent = THRESHOLD.toFixed(4);
+  document.getElementById('meta-time').textContent = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+  // Risk meter
+  if (!isUnknown) {
+    const pct = Math.round(prob * 100);
+    setTimeout(() => {
+      document.getElementById('risk-mask').style.width = `${100 - pct}%`;
+      document.getElementById('risk-marker').style.left = `${pct}%`;
+      document.getElementById('risk-marker').style.backgroundColor = riskColor;
+      document.getElementById('risk-marker').style.color = riskColor;
+    }, 50);
+  }
+
+  // High risk animated border
+  resultCard.classList.toggle('high-risk-border', risk === 'high');
+
+  // Show card
+  emptyState.style.display = 'none';
+  resultCard.classList.add('visible');
+  requestAnimationFrame(() => requestAnimationFrame(() => resultCard.classList.add('animated')));
+
+  // Add to recent queries
+  addRecent(drugA, drugB, prob, risk);
+
+  // Update graph
+  updateGraph(drugA, drugB, risk);
+}
+
+function showUnknownCard(drugA, drugB) {
+  showResult({ probability: NaN }, drugA, drugB);
+}
+
+function getRisk(prob) {
+  if (prob >= HIGH_THRESHOLD) return 'high';
+  if (prob >= THRESHOLD) return 'medium';
+  return 'low';
+}
+
+function setLoading(loading) {
+  analyzeBtn.disabled = loading;
+  if (loading) {
+    analyzeBtn.classList.add('loading');
+    analyzeBtn.innerHTML = '<span class="scan-line"></span>RUNNING GRAPH INFERENCE ...';
+  } else {
+    analyzeBtn.classList.remove('loading');
+    analyzeBtn.innerHTML = 'ANALYZE INTERACTION';
+  }
+}
+
+/* ===== RECENT QUERIES ===== */
+function addRecent(drugA, drugB, prob, risk) {
+  const entry = { drugA, drugB, prob, risk };
+  recentQueries.unshift(entry);
+  if (recentQueries.length > 5) recentQueries.pop();
+  renderRecent();
+}
+
+function renderRecent() {
+  recentList.innerHTML = '';
+  if (!recentQueries.length) {
+    recentList.innerHTML = '<li style="font-family:var(--font-mono);font-size:0.62rem;color:var(--text-t);padding:4px 8px">No queries yet</li>';
+    return;
+  }
+  recentQueries.forEach((q, i) => {
+    const li = document.createElement('li');
+    li.className = 'recent-item';
+    li.style.animationDelay = `${i * 40}ms`;
+    const isNaN_ = isNaN(q.prob);
+    li.innerHTML = `
+      <div class="recent-drugs">${escapeHtml(q.drugA)} + ${escapeHtml(q.drugB)}</div>
+      <span class="recent-badge badge-${q.risk}">${q.risk.toUpperCase()}${isNaN_ ? '' : ` · ${q.prob.toFixed(3)}`}</span>
+    `;
+    li.addEventListener('click', () => {
+      drugAInput.value = q.drugA;
+      drugBInput.value = q.drugB;
+      closeDropdown(acA); closeDropdown(acB);
+    });
+    recentList.appendChild(li);
+  });
+}
+
+/* ===== TOAST ===== */
+function showToast(msg, duration = 4000) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), duration);
+}
+
+/* ===== HELPERS ===== */
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ===== D3 FORCE GRAPH ===== */
+let simulation, svg, linkGroup, nodeGroup;
+let currentDrugA = null, currentDrugB = null;
+
+function initGraph() {
+  const container = document.getElementById('graph-container');
+  const w = container.clientWidth || 260;
+  const h = container.clientHeight || 280;
+
+  svg = d3.select('#graph-svg').attr('viewBox', `0 0 ${w} ${h}`).attr('preserveAspectRatio','xMidYMid meet');
+
+  // Define arrow marker
+  svg.append('defs').append('marker')
+    .attr('id','arrow').attr('viewBox','0 -5 10 10').attr('refX',18).attr('markerWidth',4).attr('markerHeight',4).attr('orient','auto')
+    .append('path').attr('d','M0,-5L10,0L0,5').attr('fill','#444466');
+
+  linkGroup = svg.append('g').attr('class','links');
+  nodeGroup = svg.append('g').attr('class','nodes');
+
+  simulation = d3.forceSimulation()
+    .force('link', d3.forceLink().id(d => d.id).distance(60))
+    .force('charge', d3.forceManyBody().strength(-80))
+    .force('center', d3.forceCenter(w / 2, h / 2))
+    .force('collision', d3.forceCollide(18));
+
+  renderGraph(null, null, 'low');
+}
+
+function renderGraph(drugA, drugB, risk) {
+  const container = document.getElementById('graph-container');
+  const w = container.clientWidth || 260;
+  const h = container.clientHeight || 280;
+
+  const edgeColor = { high: '#FF3B5C', medium: '#FFB800', low: '#00E096', unknown: '#8888AA' }[risk] || '#8888AA';
+  const nameA = drugA || 'Drug A';
+  const nameB = drugB || 'Drug B';
+
+  // Build nodes: 2 main + neighbor placeholders
+  const nodes = [
+    { id: nameA, main: true, group: 'a' },
+    { id: nameB, main: true, group: 'b' },
+  ];
+  const links = [{ source: nameA, target: nameB, main: true }];
+
+  // Neighbor nodes
+  const rng = seededRand(42);
+  for (let i = 0; i < 6; i++) {
+    const nid = `n_a_${i}`;
+    nodes.push({ id: nid, main: false, group: 'a' });
+    links.push({ source: nameA, target: nid, main: false });
+  }
+  for (let i = 0; i < 6; i++) {
+    const nid = `n_b_${i}`;
+    nodes.push({ id: nid, main: false, group: 'b' });
+    links.push({ source: nameB, target: nid, main: false });
+  }
+
+  // Render links
+  const linkSel = linkGroup.selectAll('line').data(links, d => d.source + '-' + d.target);
+  linkSel.exit().remove();
+  const linkEnter = linkSel.enter().append('line');
+  const allLinks = linkEnter.merge(linkSel)
+    .attr('stroke', d => d.main ? edgeColor : '#2A2A38')
+    .attr('stroke-width', d => d.main ? 2 : 1)
+    .attr('stroke-opacity', d => d.main ? 0.85 : 0.4);
+  if (risk === 'high') allLinks.filter(d => d.main).attr('stroke-dasharray', null);
+
+  // Render nodes
+  const nodeSel = nodeGroup.selectAll('g.node-g').data(nodes, d => d.id);
+  nodeSel.exit().remove();
+  const nodeEnter = nodeSel.enter().append('g').attr('class','node-g').call(
+    d3.drag()
+      .on('start', dragStart)
+      .on('drag', dragged)
+      .on('end', dragEnd)
+  );
+  nodeEnter.append('circle');
+  nodeEnter.append('text');
+  const allNodes = nodeEnter.merge(nodeSel);
+  allNodes.select('circle')
+    .attr('r', d => d.main ? 14 : 6)
+    .attr('fill', d => {
+      if (!d.main) return 'rgba(42,42,56,0.8)';
+      if (d.group === 'a') return 'rgba(0,229,255,0.15)';
+      return `rgba(${risk==='high'?'255,59,92':risk==='medium'?'255,184,0':'0,224,150'},0.15)`;
+    })
+    .attr('stroke', d => {
+      if (!d.main) return '#2A2A38';
+      if (d.group === 'a') return '#00E5FF';
+      return edgeColor;
+    })
+    .attr('stroke-width', d => d.main ? 2 : 1)
+    .attr('stroke-opacity', d => d.main ? 1 : 0.4);
+
+  allNodes.select('text')
+    .text(d => d.main ? (d.id.length > 10 ? d.id.substring(0,9)+'…' : d.id) : '')
+    .attr('text-anchor','middle').attr('dy','2.4em')
+    .attr('font-family','JetBrains Mono,monospace').attr('font-size','7px')
+    .attr('fill', d => d.group === 'a' ? '#00E5FF' : edgeColor)
+    .attr('opacity', d => d.main ? 0.9 : 0);
+
+  simulation.nodes(nodes).on('tick', () => {
+    linkGroup.selectAll('line')
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    nodeGroup.selectAll('g.node-g')
+      .attr('transform', d => `translate(${clamp(d.x,14,w-14)},${clamp(d.y,14,h-14)})`);
+  });
+  simulation.force('link').links(links);
+  simulation.alpha(0.8).restart();
+}
+
+function updateGraph(drugA, drugB, risk) {
+  currentDrugA = drugA; currentDrugB = drugB;
+  renderGraph(drugA, drugB, risk);
+}
+
+function dragStart(event, d) { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+function dragEnd(event, d) { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// Simple seeded random (not truly seeded in JS without a lib, just consistent-ish)
+function seededRand(seed) {
+  let s = seed;
+  return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; };
+}
+</script>
+</body>
+</html>

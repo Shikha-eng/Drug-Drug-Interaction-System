@@ -1,0 +1,38 @@
+{
+  "optimal_threshold": 0.4391,
+  "risk_buckets": {
+    "LOW": [
+      0,
+      0.26
+    ],
+    "MEDIUM": [
+      0.26,
+      0.4391
+    ],
+    "HIGH": [
+      0.4391,
+      1.0
+    ]
+  },
+  "metrics": {
+    "auroc": 0.9777,
+    "auprc": 0.9757,
+    "accuracy": 0.93,
+    "precision": 0.93,
+    "recall": 0.93,
+    "f1": 0.93,
+    "false_negative_rate": 0.0746
+  },
+  "model_params": {
+    "n_estimators": 3000,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "best_iteration": 2998
+  },
+  "shap_operator_importance": {
+    "avg": 6.6782,
+    "l1": 6.3126,
+    "hadamard": 6.2808,
+    "l2": 1.4732
+  }
+}

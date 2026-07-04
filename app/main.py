@@ -2,7 +2,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pathlib import Path
 from .schemas import DDIRequest, DDIResponse
 from .model import predict, EMBEDDINGS, METADATA
@@ -25,22 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-
-# Keep API routes defined below (they will still be reachable under their paths)
-# Note: StaticFiles with html=True will automatically serve index.html for GET /
-
-@app.get("/")
-def root():
-    return {
-        "message": "Drug-Drug Interaction Predictor API",
-        "docs": "/docs",
-        "endpoints": [
-            "/health",
-            "/drugs",
-            "/predict"
-        ]
-    }
+# ---- API routes must be declared BEFORE the static mount at "/" ----
 
 @app.post("/predict", response_model=DDIResponse)
 def predict_interaction(request: DDIRequest):
@@ -48,7 +32,7 @@ def predict_interaction(request: DDIRequest):
         raise HTTPException(status_code=400, detail="Both drug names required")
     if request.drug_a.strip().lower() == request.drug_b.strip().lower():
         raise HTTPException(status_code=400, detail="Drug A and Drug B must be different")
-    
+
     result = predict(request.drug_a, request.drug_b)
     return result
 
@@ -70,8 +54,9 @@ def health():
         "threshold": METADATA["optimal_threshold"]
     }
 
-
-@app.get("/ui")
-def serve_frontend():
-    frontend_file = Path(__file__).parent.parent / "frontend" / "index.html"
-    return FileResponse(str(frontend_file))
+# ---- Static frontend mounted LAST, at root ----
+# This serves frontend/index.html at "/" and any other static
+# assets in the frontend folder. Must come after all API routes above,
+# since it's a catch-all for unmatched paths.
+frontend_dir = Path(__file__).parent.parent / "frontend"
+app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")
